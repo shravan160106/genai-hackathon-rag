@@ -1,33 +1,36 @@
-import pytesseract
-import re
-from pdf2image import convert_from_path
-from PIL import ImageEnhance
+from mistralai import Mistral
+import base64
+import os
+from dotenv import load_dotenv
 
-pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+load_dotenv()
 
-POPPLER_PATH = r"C:\poppler-25.12.0\Library\bin"
+api_key = os.getenv("MISTRAL_API_KEY")
 
+client = Mistral(api_key=api_key)
 
 def extract_text_from_pdf(pdf_path):
 
-    images = convert_from_path(pdf_path, poppler_path=POPPLER_PATH)
+    with open(pdf_path, "rb") as file:
+        pdf_data = file.read()
+
+    encoded_pdf = base64.b64encode(pdf_data).decode()
+
+    response = client.ocr.process(
+        model="mistral-ocr-latest",
+        document={
+            "type": "document_url",
+            "document_url": f"data:application/pdf;base64,{encoded_pdf}"
+        }
+    )
 
     pages = []
 
-    for i, img in enumerate(images):
-
-        img = img.convert("L")
-
-        enhancer = ImageEnhance.Contrast(img)
-        img = enhancer.enhance(3)
-
-        text = pytesseract.image_to_string(img)
-
-        text = re.sub(r'[^a-zA-Z0-9.,\n ]', '', text)
+    for i, page in enumerate(response.pages):
 
         pages.append({
             "page": i + 1,
-            "text": text
+            "text": page.markdown
         })
 
     return pages

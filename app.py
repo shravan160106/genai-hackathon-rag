@@ -1,96 +1,108 @@
 import streamlit as st
-import os
-
 from ocr import extract_text_from_pdf
 from rag import build_vector_db, search
 from llm import generate_answer
+from report import generate_pdf_report
+
+import os
 
 st.set_page_config(
     page_title="AI Notes Assistant",
-    page_icon="🤖",
     layout="wide"
 )
 
-st.title("📚 Handwritten Notes AI Assistant")
+st.title("📚 AI Notes Assistant")
+
 st.write("Upload handwritten notes and ask questions from them.")
 
-# ---------------- SIDEBAR ---------------- #
+# ---------------- SESSION MEMORY ---------------- #
 
-with st.sidebar:
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
 
-    st.header("Upload Notes")
+# ---------------- FILE UPLOAD ---------------- #
 
-    uploaded_file = st.file_uploader(
-        "Upload PDF",
-        type=["pdf"],
-        key="pdf_uploader"
-    )
+uploaded_file = st.file_uploader("Upload PDF", type=["pdf"])
 
-    if uploaded_file is not None:
+if uploaded_file:
 
-        file_bytes = uploaded_file.getvalue()
+    with open("notes.pdf", "wb") as f:
+        f.write(uploaded_file.getvalue())
 
-        with open("notes.pdf", "wb") as f:
-            f.write(file_bytes)
+    st.success("PDF uploaded")
 
-        st.success("PDF uploaded successfully!")
+# ---------------- PROCESS NOTES ---------------- #
 
-    process_button = st.button("Process Notes")
+if st.button("Process Notes"):
 
-    if process_button:
+    if os.path.exists("notes.pdf"):
 
-        if os.path.exists("notes.pdf"):
+        with st.spinner("Processing notes..."):
 
-            with st.spinner("Running OCR and building RAG database..."):
+            pages = extract_text_from_pdf("notes.pdf")
 
-                pages = extract_text_from_pdf("notes.pdf")
+            vector_db, texts = build_vector_db(pages)
 
-                vector_db, texts = build_vector_db(pages)
+            st.session_state.vector_db = vector_db
+            st.session_state.texts = texts
 
-                st.session_state["vector_db"] = vector_db
-                st.session_state["texts"] = texts
+        st.success("Notes processed")
 
-            st.success("Notes processed successfully!")
+# ---------------- CHAT INTERFACE ---------------- #
 
-        else:
-            st.error("Please upload a PDF first!")
+st.subheader("Chat with your notes")
 
-    st.markdown("---")
-    st.write("Built for GenAI Hackathon")
+question = st.text_input("Ask a question")
 
-# ---------------- MAIN PAGE ---------------- #
+if st.button("Ask"):
 
-col1, col2 = st.columns([2, 3])
+    if "vector_db" not in st.session_state:
 
-with col1:
+        st.warning("Process notes first")
 
-    st.subheader("Ask a Question")
+    else:
 
-    question = st.text_area("Type your question")
+        context = search(
+            question,
+            st.session_state.vector_db,
+            st.session_state.texts
+        )
 
-    ask_button = st.button("Ask AI")
+        answer = generate_answer(question, context)
 
-with col2:
+        st.session_state.chat_history.append({
+            "question": question,
+            "answer": answer,
+            "sources": context
+        })
 
-    st.subheader("AI Answer")
+# ---------------- DISPLAY CHAT ---------------- #
 
-    if ask_button:
+for chat in st.session_state.chat_history:
 
-        if "vector_db" not in st.session_state:
-            st.error("Please process notes first!")
-        else:
+    st.markdown("### 🙋 Question")
+    st.write(chat["question"])
 
-            context = search(
-                question,
-                st.session_state["vector_db"],
-                st.session_state["texts"]
-            )
+    st.markdown("### 🤖 Answer")
+    st.write(chat["answer"])
 
-            answer = generate_answer(question, context)
+    st.markdown("### 📄 Sources")
 
-            st.write(answer)
+    for c in chat["sources"]:
+        st.write("- " + c)
 
-            st.subheader("Source Notes")
+    st.divider()
 
-            for c in context:
-                st.write(c)
+# ---------------- PDF REPORT ---------------- #
+
+if st.button("Generate PDF Report"):
+
+    path = generate_pdf_report(st.session_state.chat_history)
+
+    with open(path, "rb") as f:
+        st.download_button(
+            label="Download Report",
+            data=f,
+            file_name="report.pdf",
+            mime="application/pdf"
+        )
