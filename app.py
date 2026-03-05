@@ -1,6 +1,10 @@
 import streamlit as st
 import os
 
+from ocr import extract_text_from_pdf
+from rag import build_vector_db, search
+from llm import generate_answer
+
 st.set_page_config(
     page_title="AI Notes Assistant",
     page_icon="🤖",
@@ -30,14 +34,24 @@ with st.sidebar:
             f.write(file_bytes)
 
         st.success("PDF uploaded successfully!")
-        st.write("File ready for processing")
 
     process_button = st.button("Process Notes")
 
     if process_button:
 
         if os.path.exists("notes.pdf"):
-            st.success("Notes will be processed with OCR")
+
+            with st.spinner("Running OCR and building RAG database..."):
+
+                pages = extract_text_from_pdf("notes.pdf")
+
+                vector_db, texts = build_vector_db(pages)
+
+                st.session_state["vector_db"] = vector_db
+                st.session_state["texts"] = texts
+
+            st.success("Notes processed successfully!")
+
         else:
             st.error("Please upload a PDF first!")
 
@@ -46,7 +60,7 @@ with st.sidebar:
 
 # ---------------- MAIN PAGE ---------------- #
 
-col1, col2 = st.columns([2,3])
+col1, col2 = st.columns([2, 3])
 
 with col1:
 
@@ -61,6 +75,22 @@ with col2:
     st.subheader("AI Answer")
 
     if ask_button:
-        st.info("AI answer will appear here")
 
-    st.subheader("Source Notes")
+        if "vector_db" not in st.session_state:
+            st.error("Please process notes first!")
+        else:
+
+            context = search(
+                question,
+                st.session_state["vector_db"],
+                st.session_state["texts"]
+            )
+
+            answer = generate_answer(question, context)
+
+            st.write(answer)
+
+            st.subheader("Source Notes")
+
+            for c in context:
+                st.write(c)
